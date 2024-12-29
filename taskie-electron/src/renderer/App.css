@@ -1,0 +1,58 @@
+@font-face {
+  font-family: 'Comic Neue';
+  src: url('/assets/fonts/ComicNeue-Bold.ttf') format('truetype');
+  font-weight: normal;
+  font-style: normal;
+}
+
+body .app {
+  font-family: Comic Neue;
+}
+
+.rbc-event.red {
+  background-color: #f44336;
+}
+
+.rbc-event.rbc-selected.red {
+  background-color: #d62915;
+}
+
+.rbc-event.green {
+  background-color: #4caf50;
+}
+
+.rbc-event.rbc-selected.green {
+  background-color: #22a12a;
+}
+
+.rbc-event.blue {
+  background-color: #265985;
+}
+
+.rbc-event.rbc-selected.blue {
+  background-color: #045cb5;
+}
+
+.rbc-event.orange {
+  background-color: #fa8900;
+}
+
+.rbc-event.rbc-selected.orange {
+  background-color: #db8000;
+}
+
+.rbc-event.purple {
+  background-color: #673ab7;
+}
+
+.rbc-event.rbc-selected.purple {
+  background-color: #531ba8;
+}
+
+.rbc-event.yellow {
+  background-color: #ffb300;
+}
+
+.rbc-event.rbc-selected.yellow {
+  background-color: #e0a500;
+}

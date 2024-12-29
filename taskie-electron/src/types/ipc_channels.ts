@@ -1,0 +1,9 @@
+export const IPC_CHANNELS = {
+  CREATE_EVENT: 'CREATE_EVENT',
+  GET_EVENTS: 'GET_EVENTS',
+  GET_EVENT_BY_ID: 'GET_EVENT_BY_ID',
+  UPDATE_EVENT: 'UPDATE_EVENT',
+  DELETE_EVENT: 'DELETE_EVENT',
+} as const;
+
+export type IpcChannel = keyof typeof IPC_CHANNELS;
