@@ -1,15 +1,16 @@
 slint::include_modules!();
 
-use chrono::{Datelike, NaiveDate, Utc, Local};
+use chrono::{Datelike, Local, NaiveDate, Utc};
 use ksni::blocking::TrayMethods;
 use ksni::menu::*;
 use ksni::{MenuItem, Tray};
 use rusqlite::{params, Connection};
 use slint::{ModelRc, SharedString, VecModel};
+use std::cell::Cell;
 use std::path::PathBuf;
 use std::rc::Rc;
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct Event {
     pub id: i64,
     pub start: Option<String>,
@@ -124,6 +125,111 @@ pub fn check_events(conn: &Connection) -> Result<(), Box<dyn std::error::Error>>
     Ok(())
 }
 
+fn fetch_all_events(conn: &Connection) -> Vec<Event> {
+    let mut stmt = match conn.prepare(
+        "SELECT id, COALESCE(start_date, start) as start_val, COALESCE(end_date, end) as end_val, title, description, color, notified FROM events"
+    ) {
+        Ok(s) => s,
+        Err(_) => return Vec::new(),
+    };
+
+    let event_iter = stmt.query_map([], |row| {
+        Ok(Event {
+            id: row.get(0)?,
+            start: row.get(1)?,
+            end: row.get(2)?,
+            title: row.get(3)?,
+            description: row.get(4)?,
+            color: row.get(5)?,
+            notified: row.get(6)?,
+        })
+    });
+
+    match event_iter {
+        Ok(iter) => iter.filter_map(|r| r.ok()).collect(),
+        Err(_) => Vec::new(),
+    }
+}
+
+fn parse_date_from_str(s: &str) -> Option<NaiveDate> {
+    if let Ok(dt) = chrono::DateTime::parse_from_rfc3339(s) {
+        return Some(dt.date_naive());
+    }
+    if let Ok(dt) = chrono::NaiveDateTime::parse_from_str(s, "%Y-%m-%dT%H:%M:%S%.fZ") {
+        return Some(dt.date());
+    }
+    if let Ok(dt) = chrono::NaiveDateTime::parse_from_str(s, "%Y-%m-%d %H:%M:%S") {
+        return Some(dt.date());
+    }
+    if let Ok(dt) = chrono::NaiveDateTime::parse_from_str(s, "%Y-%m-%d %H:%M") {
+        return Some(dt.date());
+    }
+    if let Ok(d) = NaiveDate::parse_from_str(s, "%Y-%m-%d") {
+        return Some(d);
+    }
+    if s.len() >= 10 {
+        if let Ok(d) = NaiveDate::parse_from_str(&s[..10], "%Y-%m-%d") {
+            return Some(d);
+        }
+    }
+    None
+}
+
+fn format_time_from_str(s: &str) -> String {
+    if let Ok(dt) = chrono::DateTime::parse_from_rfc3339(s) {
+        return dt.format("%H:%M").to_string();
+    }
+    if let Ok(dt) = chrono::NaiveDateTime::parse_from_str(s, "%Y-%m-%dT%H:%M:%S%.fZ") {
+        return dt.format("%H:%M").to_string();
+    }
+    if let Ok(dt) = chrono::NaiveDateTime::parse_from_str(s, "%Y-%m-%d %H:%M:%S") {
+        return dt.format("%H:%M").to_string();
+    }
+    if let Ok(dt) = chrono::NaiveDateTime::parse_from_str(s, "%Y-%m-%d %H:%M") {
+        return dt.format("%H:%M").to_string();
+    }
+    let parts: Vec<&str> = s.split_whitespace().collect();
+    if parts.len() > 1 {
+        return parts[1].to_string();
+    }
+    "".to_string()
+}
+
+fn get_events_for_date(db_events: &[Event], target_date: NaiveDate) -> Vec<CalendarEvent> {
+    db_events
+        .iter()
+        .filter(|e| {
+            if let Some(ref start_str) = e.start {
+                if let Some(start_date) = parse_date_from_str(start_str) {
+                    let end_date = e
+                        .end
+                        .as_deref()
+                        .and_then(parse_date_from_str)
+                        .unwrap_or(start_date);
+                    let effective_end = if end_date < start_date { start_date } else { end_date };
+                    target_date >= start_date && target_date <= effective_end
+                } else {
+                    false
+                }
+            } else {
+                false
+            }
+        })
+        .map(|e| {
+            let start_time = e.start.as_deref().map(format_time_from_str).unwrap_or_default();
+            let end_time = e.end.as_deref().map(format_time_from_str).unwrap_or_default();
+            CalendarEvent {
+                id: e.id as i32,
+                title: SharedString::from(&e.title),
+                description: SharedString::from(e.description.as_deref().unwrap_or("")),
+                start_time: SharedString::from(start_time),
+                end_time: SharedString::from(end_time),
+                color: SharedString::from(e.color.as_deref().unwrap_or("#3b82f6")),
+            }
+        })
+        .collect()
+}
+
 struct TaskieTray {
     ui_handle: slint::Weak<MainWindow>,
 }
@@ -181,7 +287,7 @@ impl Tray for TaskieTray {
     }
 }
 
-fn generate_calendar_days(year: i32, month: u32) -> Vec<DayCell> {
+fn generate_calendar_days(year: i32, month: u32, db_events: &[Event]) -> Vec<DayCell> {
     let first_of_month = NaiveDate::from_ymd_opt(year, month, 1).unwrap();
     let weekday_of_first = first_of_month.weekday().num_days_from_sunday() as i32;
 
@@ -217,27 +323,34 @@ fn generate_calendar_days(year: i32, month: u32) -> Vec<DayCell> {
     let today = Local::now().date_naive();
     let mut cells = Vec::new();
 
+    let build_cell = |date: NaiveDate, is_current_month: bool| -> DayCell {
+        let events = get_events_for_date(db_events, date);
+        let event_count = events.len() as i32;
+        let has_events = event_count > 0;
+        let events_model = Rc::new(VecModel::from(events));
+
+        DayCell {
+            day_number: SharedString::from(format!("{:02}", date.day())),
+            is_current_month,
+            is_today: date == today,
+            date_str: date.to_string().into(),
+            has_events,
+            event_count,
+            events: ModelRc::from(events_model),
+        }
+    };
+
     // Previous month trailing days
     let start_day_num = days_in_prev_month - weekday_of_first + 1;
     for d in start_day_num..=days_in_prev_month {
         let date = NaiveDate::from_ymd_opt(prev_year, prev_month, d as u32).unwrap();
-        cells.push(DayCell {
-            day_number: SharedString::from(format!("{:02}", d)),
-            is_current_month: false,
-            is_today: date == today,
-            date_str: date.to_string().into(),
-        });
+        cells.push(build_cell(date, false));
     }
 
     // Current month days
     for d in 1..=days_in_current_month {
         let date = NaiveDate::from_ymd_opt(year, month, d as u32).unwrap();
-        cells.push(DayCell {
-            day_number: SharedString::from(format!("{:02}", d)),
-            is_current_month: true,
-            is_today: date == today,
-            date_str: date.to_string().into(),
-        });
+        cells.push(build_cell(date, true));
     }
 
     // Next month leading days to complete 42 cells (6 rows * 7 cols)
@@ -250,12 +363,7 @@ fn generate_calendar_days(year: i32, month: u32) -> Vec<DayCell> {
     };
     for d in 1..=remaining as u32 {
         let date = NaiveDate::from_ymd_opt(next_year, next_month, d).unwrap();
-        cells.push(DayCell {
-            day_number: SharedString::from(format!("{:02}", d)),
-            is_current_month: false,
-            is_today: date == today,
-            date_str: date.to_string().into(),
-        });
+        cells.push(build_cell(date, false));
     }
 
     cells
@@ -292,52 +400,68 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     });
 
     let now = Utc::now().naive_utc().date();
-    let mut current_year = now.year();
-    let mut current_month = now.month();
+    let current_year = Rc::new(Cell::new(now.year()));
+    let current_month = Rc::new(Cell::new(now.month()));
 
     let update_calendar = {
         let ui_handle = ui.as_weak();
+        let db_rc = db_rc.clone();
+        let current_year = current_year.clone();
+        let current_month = current_month.clone();
         move |year: i32, month: u32| {
+            current_year.set(year);
+            current_month.set(month);
             if let Some(ui) = ui_handle.upgrade() {
+                let db = db_rc.borrow();
+                let events = fetch_all_events(&db);
+
                 let month_name = NaiveDate::from_ymd_opt(year, month, 1)
                     .unwrap()
                     .format("%Y %B")
                     .to_string();
                 ui.set_current_month_year(month_name.into());
 
-                let days = generate_calendar_days(year, month);
+                let days = generate_calendar_days(year, month, &events);
                 let model = Rc::new(VecModel::from(days));
                 ui.set_days(ModelRc::from(model));
             }
         }
     };
 
-    update_calendar(current_year, current_month);
+    update_calendar(current_year.get(), current_month.get());
 
     // Navigation callbacks
     {
         let update_calendar = update_calendar.clone();
+        let current_year = current_year.clone();
+        let current_month = current_month.clone();
         ui.on_next_month(move || {
-            if current_month == 12 {
-                current_month = 1;
-                current_year += 1;
+            let mut y = current_year.get();
+            let mut m = current_month.get();
+            if m == 12 {
+                m = 1;
+                y += 1;
             } else {
-                current_month += 1;
+                m += 1;
             }
-            update_calendar(current_year, current_month);
+            update_calendar(y, m);
         });
     }
 
     {
         let update_calendar = update_calendar.clone();
+        let current_year = current_year.clone();
+        let current_month = current_month.clone();
         ui.on_prev_month(move || {
-            if current_month == 1 {
-                current_month = 12;
-                current_year -= 1;
+            let mut y = current_year.get();
+            let mut m = current_month.get();
+            if m == 1 {
+                m = 12;
+                y -= 1;
             } else {
-                current_month -= 1;
+                m -= 1;
             }
-            update_calendar(current_year, current_month);
+            update_calendar(y, m);
         });
     }
 
@@ -345,18 +469,34 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         let update_calendar = update_calendar.clone();
         ui.on_today_month(move || {
             let now = Local::now().date_naive();
-            let year = now.year();
-            let month = now.month();
-            update_calendar(year, month);
+            update_calendar(now.year(), now.month());
         });
     }
+
+    // Helper closure to update selected_events for popup view
+    let refresh_selected_events = {
+        let ui_handle = ui.as_weak();
+        let db_rc = db_rc.clone();
+        move |date_str: &str| {
+            if let Some(ui) = ui_handle.upgrade() {
+                if let Ok(target_date) = NaiveDate::parse_from_str(date_str, "%Y-%m-%d") {
+                    let db = db_rc.borrow();
+                    let events = fetch_all_events(&db);
+                    let sel_events = get_events_for_date(&events, target_date);
+                    ui.set_selected_events(ModelRc::from(Rc::new(VecModel::from(sel_events))));
+                }
+            }
+        }
+    };
 
     // Date click -> Show popup
     {
         let ui_handle = ui.as_weak();
+        let refresh_selected_events = refresh_selected_events.clone();
         ui.on_date_clicked(move |date_str| {
             if let Some(ui) = ui_handle.upgrade() {
-                ui.set_selected_date(date_str);
+                ui.set_selected_date(date_str.clone());
+                refresh_selected_events(&date_str);
                 ui.set_show_popup(true);
             }
         });
@@ -376,17 +516,49 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     {
         let ui_handle = ui.as_weak();
         let db_rc = db_rc.clone();
-        ui.on_save_event(move |title, start, end, desc| {
+        let update_calendar = update_calendar.clone();
+        let refresh_selected_events = refresh_selected_events.clone();
+        let current_year = current_year.clone();
+        let current_month = current_month.clone();
+        ui.on_save_event(move |title, start, end, desc, color| {
             if let Some(ui) = ui_handle.upgrade() {
                 let db = db_rc.borrow();
                 db.execute(
                     "INSERT INTO events (title, start_date, end_date, description, color) VALUES (?1, ?2, ?3, ?4, ?5)",
-                    params![title.as_str(), start.as_str(), end.as_str(), desc.as_str(), "#0078d4"],
+                    params![title.as_str(), start.as_str(), end.as_str(), desc.as_str(), color.as_str()],
                 ).expect("Failed to insert event into SQLite");
 
-                ui.set_show_popup(false);
+                let selected_date = ui.get_selected_date().to_string();
+
+                update_calendar(current_year.get(), current_month.get());
+                refresh_selected_events(&selected_date);
+
                 ui.set_event_title("".into());
                 ui.set_event_description("".into());
+            }
+        });
+    }
+
+    // Delete event from SQLite database
+    {
+        let ui_handle = ui.as_weak();
+        let db_rc = db_rc.clone();
+        let update_calendar = update_calendar.clone();
+        let refresh_selected_events = refresh_selected_events.clone();
+        let current_year = current_year.clone();
+        let current_month = current_month.clone();
+        ui.on_delete_event(move |event_id| {
+            if let Some(ui) = ui_handle.upgrade() {
+                let db = db_rc.borrow();
+                db.execute(
+                    "DELETE FROM events WHERE id = ?1",
+                    params![event_id],
+                ).expect("Failed to delete event from SQLite");
+
+                let selected_date = ui.get_selected_date().to_string();
+
+                update_calendar(current_year.get(), current_month.get());
+                refresh_selected_events(&selected_date);
             }
         });
     }
@@ -524,5 +696,52 @@ mod tests {
             .unwrap();
 
         assert!(notified.is_some());
+    }
+
+    #[test]
+    fn test_get_events_for_date() {
+        let conn = setup_test_db();
+        conn.execute(
+            "INSERT INTO events (title, start_date, end_date, description, color) VALUES (?, ?, ?, ?, ?)",
+            params!["Team Sync", "2026-03-29 09:00", "2026-03-29 10:00", "Weekly sync", "#10b981"],
+        )
+        .unwrap();
+
+        let events = fetch_all_events(&conn);
+        let date = NaiveDate::from_ymd_opt(2026, 3, 29).unwrap();
+        let day_events = get_events_for_date(&events, date);
+
+        assert_eq!(day_events.len(), 1);
+        assert_eq!(day_events[0].title.as_str(), "Team Sync");
+        assert_eq!(day_events[0].color.as_str(), "#10b981");
+    }
+
+    #[test]
+    fn test_generate_calendar_days_contains_events() {
+        let conn = setup_test_db();
+        conn.execute(
+            "INSERT INTO events (title, start_date, end_date, description, color) VALUES (?, ?, ?, ?, ?)",
+            params!["Conference", "2026-03-15 08:00", "2026-03-17 18:00", "Tech Conf", "#8b5cf6"],
+        )
+        .unwrap();
+
+        let events = fetch_all_events(&conn);
+        let days = generate_calendar_days(2026, 3, &events);
+
+        assert_eq!(days.len(), 42);
+
+        // March 15, 16, and 17 should have the event
+        let march_15_cell = days.iter().find(|cell| cell.date_str.as_str() == "2026-03-15").unwrap();
+        assert!(march_15_cell.has_events);
+        assert_eq!(march_15_cell.event_count, 1);
+
+        let march_16_cell = days.iter().find(|cell| cell.date_str.as_str() == "2026-03-16").unwrap();
+        assert!(march_16_cell.has_events);
+
+        let march_17_cell = days.iter().find(|cell| cell.date_str.as_str() == "2026-03-17").unwrap();
+        assert!(march_17_cell.has_events);
+
+        let march_18_cell = days.iter().find(|cell| cell.date_str.as_str() == "2026-03-18").unwrap();
+        assert!(!march_18_cell.has_events);
     }
 }

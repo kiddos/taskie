@@ -1,114 +1,211 @@
-import { Button, LineEdit } from "std-widgets.slint";
+import { Button, LineEdit, ScrollView } from "std-widgets.slint";
+
+export struct CalendarEvent {
+    id: int,
+    title: string,
+    description: string,
+    start_time: string,
+    end_time: string,
+    color: string,
+}
 
 export struct DayCell {
     day_number: string,
     is_current_month: bool,
     is_today: bool,
     date_str: string,
+    has_events: bool,
+    event_count: int,
+    events: [CalendarEvent],
 }
 
 export component MainWindow inherits Window {
-    title: "taskie";
-    width: 920px;
-    height: 720px;
+    title: "Taskie - Calendar & Tasks";
+    min-width: 960px;
+    min-height: 720px;
+    background: #f8fafc;
 
-    in-out property <string> current_month_year: "2026 October";
+    in-out property <string> current_month_year: "";
     in-out property <[DayCell]> days;
     in-out property <bool> show_popup: false;
     in-out property <string> selected_date: "";
+    in-out property <[CalendarEvent]> selected_events;
     in-out property <string> event_title: "";
     in-out property <string> event_description: "";
+    in-out property <string> event_start_time: "09:00";
+    in-out property <string> event_end_time: "10:00";
+    in-out property <string> event_color: "#3b82f6";
 
     callback date-clicked(string);
-    callback save-event(string, string, string, string);
+    callback save-event(string, string, string, string, string);
+    callback delete-event(int);
     callback close-popup();
     callback next-month();
     callback prev-month();
     callback today-month();
 
     VerticalLayout {
-        // Menu bar
-        HorizontalLayout {
-            padding: 8px;
-            spacing: 16px;
-            Text { text: "File"; font-size: 14px; }
-            Text { text: "View"; font-size: 14px; }
-            Text { text: "Help"; font-size: 14px; }
-        }
+        padding: 0px;
+        spacing: 0px;
 
-        // Toolbar
-        HorizontalLayout {
-            padding: 10px;
-            spacing: 10px;
-            alignment: space-between;
+        // Top Navigation Header
+        Rectangle {
+            height: 64px;
+            background: #0f172a;
 
             HorizontalLayout {
-                spacing: 8px;
-                Button { text: "Today"; clicked => { root.today-month(); } }
-                Button { text: "Back"; clicked => { root.prev-month(); } }
-                Button { text: "Next"; clicked => { root.next-month(); } }
-            }
+                padding-left: 20px;
+                padding-right: 20px;
+                alignment: space-between;
 
-            Text {
-                text: root.current_month_year;
-                font-size: 18px;
-                font-weight: 700;
-                vertical-alignment: center;
+                // Title & Logo
+                HorizontalLayout {
+                    spacing: 12px;
+
+                    Rectangle {
+                        width: 32px;
+                        height: 32px;
+                        background: #3b82f6;
+                        border-radius: 8px;
+                        y: (parent.height - self.height) / 2;
+
+                        Text {
+                            text: "📅";
+                            font-size: 16px;
+                            x: (parent.width - self.width) / 2;
+                            y: (parent.height - self.height) / 2;
+                        }
+                    }
+
+                    Text {
+                        text: "Taskie Calendar";
+                        font-size: 20px;
+                        font-weight: 700;
+                        color: #ffffff;
+                        vertical-alignment: center;
+                    }
+                }
+
+                // Month Controls
+                HorizontalLayout {
+                    spacing: 12px;
+
+                    Rectangle {
+                        width: 70px;
+                        height: 34px;
+                        background: #1e293b;
+                        border-radius: 6px;
+                        border-width: 1px;
+                        border-color: #334155;
+                        y: (parent.height - self.height) / 2;
+
+                        TouchArea {
+                            clicked => { root.today-month(); }
+                        }
+
+                        Text {
+                            text: "Today";
+                            color: #f8fafc;
+                            font-weight: 600;
+                            font-size: 13px;
+                            x: (parent.width - self.width) / 2;
+                            y: (parent.height - self.height) / 2;
+                        }
+                    }
+
+                    HorizontalLayout {
+                        spacing: 2px;
+                        y: (parent.height - self.height) / 2;
+
+                        Rectangle {
+                            width: 36px;
+                            height: 34px;
+                            background: #1e293b;
+                            border-radius: 6px;
+                            border-width: 1px;
+                            border-color: #334155;
+
+                            TouchArea {
+                                clicked => { root.prev-month(); }
+                            }
+
+                            Text {
+                                text: "‹";
+                                color: #f8fafc;
+                                font-size: 20px;
+                                font-weight: 700;
+                                x: (parent.width - self.width) / 2;
+                                y: (parent.height - self.height) / 2 - 2px;
+                            }
+                        }
+
+                        Rectangle {
+                            width: 36px;
+                            height: 34px;
+                            background: #1e293b;
+                            border-radius: 6px;
+                            border-width: 1px;
+                            border-color: #334155;
+
+                            TouchArea {
+                                clicked => { root.next-month(); }
+                            }
+
+                            Text {
+                                text: "›";
+                                color: #f8fafc;
+                                font-size: 20px;
+                                font-weight: 700;
+                                x: (parent.width - self.width) / 2;
+                                y: (parent.height - self.height) / 2 - 2px;
+                            }
+                        }
+                    }
+
+                    Text {
+                        text: root.current_month_year;
+                        font-size: 18px;
+                        font-weight: 700;
+                        color: #f8fafc;
+                        vertical-alignment: center;
+                    }
+                }
             }
+        }
+
+        // Weekday Header
+        Rectangle {
+            height: 36px;
+            background: #f1f5f9;
+            border-width: 1px;
+            border-color: #e2e8f0;
 
             HorizontalLayout {
-                spacing: 4px;
-                Rectangle {
-                    width: 70px; height: 32px;
-                    background: #dcdcdc;
-                    border-radius: 4px;
-                    Text { text: "Month"; y: (parent.height - self.height)/2; x: (parent.width - self.width)/2; }
-                }
-                Rectangle {
-                    width: 60px; height: 32px;
-                    background: #f0f0f0;
-                    border-radius: 4px;
-                    Text { text: "Week"; y: (parent.height - self.height)/2; x: (parent.width - self.width)/2; }
-                }
-                Rectangle {
-                    width: 50px; height: 32px;
-                    background: #f0f0f0;
-                    border-radius: 4px;
-                    Text { text: "Day"; y: (parent.height - self.height)/2; x: (parent.width - self.width)/2; }
-                }
-                Rectangle {
-                    width: 70px; height: 32px;
-                    background: #f0f0f0;
-                    border-radius: 4px;
-                    Text { text: "Agenda"; y: (parent.height - self.height)/2; x: (parent.width - self.width)/2; }
+                for day-name in ["SUN", "MON", "TUE", "WED", "THU", "FRI", "SAT"]: Rectangle {
+                    Text {
+                        text: day-name;
+                        font-size: 11px;
+                        font-weight: 700;
+                        color: #64748b;
+                        x: (parent.width - self.width) / 2;
+                        y: (parent.height - self.height) / 2;
+                    }
                 }
             }
         }
 
-        // Days of week header
-        HorizontalLayout {
-            height: 30px;
-            for day-name in ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"]: Rectangle {
-                border-width: 0.5px;
-                border-color: #dcdcdc;
-                Text {
-                    text: day-name;
-                    y: (parent.height - self.height)/2;
-                    x: (parent.width - self.width)/2;
-                    font-weight: 600;
-                    font-size: 12px;
-                }
-            }
-        }
-
-        // Calendar Grid (6 rows x 7 cols)
+        // Main Calendar Grid (6 rows x 7 cols)
         VerticalLayout {
+            spacing: 0px;
+
             for row in 6: HorizontalLayout {
+                spacing: 0px;
+
                 for col in 7: Rectangle {
                     property <int> index: row * 7 + col;
                     border-width: 0.5px;
-                    border-color: #dcdcdc;
-                    background: root.days[index].is_today ? #eaf4fc : (root.days[index].is_current_month ? #ffffff : #eaeaea);
+                    border-color: #e2e8f0;
+                    background: root.days[index].is_today ? #f0f9ff : (root.days[index].is_current_month ? #ffffff : #f8fafc);
 
                     TouchArea {
                         clicked => {
@@ -116,96 +213,336 @@ export component MainWindow inherits Window {
                         }
                     }
 
-                    Text {
-                        text: root.days[index].day_number;
-                        x: parent.width - self.width - 8px;
-                        y: 8px;
-                        font-size: 12px;
-                        color: root.days[index].is_current_month ? #111111 : #777777;
+                    // Top row: Day Number badge
+                    Rectangle {
+                        x: parent.width - self.width - 6px;
+                        y: 6px;
+                        width: root.days[index].is_today ? 24px : 20px;
+                        height: root.days[index].is_today ? 24px : 20px;
+                        border-radius: 12px;
+                        background: root.days[index].is_today ? #2563eb : transparent;
+
+                        Text {
+                            text: root.days[index].day_number;
+                            font-size: 12px;
+                            font-weight: root.days[index].is_today ? 700 : 500;
+                            color: root.days[index].is_today ? #ffffff : (root.days[index].is_current_month ? #1e293b : #94a3b8);
+                            x: (parent.width - self.width) / 2;
+                            y: (parent.height - self.height) / 2;
+                        }
+                    }
+
+                    // Events preview container inside day cell
+                    VerticalLayout {
+                        padding-top: 30px;
+                        padding-left: 4px;
+                        padding-right: 4px;
+                        padding-bottom: 4px;
+                        spacing: 3px;
+
+                        for evt[evt_idx] in root.days[index].events: Rectangle {
+                            visible: evt_idx < 3;
+                            height: 18px;
+                            border-radius: 3px;
+                            background: evt.color == "#10b981" ? #10b981 : (evt.color == "#ef4444" ? #ef4444 : (evt.color == "#8b5cf6" ? #8b5cf6 : (evt.color == "#f59e0b" ? #f59e0b : #3b82f6)));
+
+                            Text {
+                                text: evt.title;
+                                x: 4px;
+                                font-size: 10px;
+                                font-weight: 600;
+                                color: #ffffff;
+                                overflow: elide;
+                                vertical-alignment: center;
+                            }
+                        }
+
+                        if root.days[index].event_count > 3: Text {
+                            text: "+" + (root.days[index].event_count - 3) + " more";
+                            font-size: 10px;
+                            font-weight: 700;
+                            color: #2563eb;
+                            horizontal-alignment: center;
+                        }
                     }
                 }
             }
         }
     }
 
-    // Popup Dialog
+    // Modal / Popup Dialog
     Rectangle {
         visible: root.show_popup;
         width: parent.width;
         height: parent.height;
-        background: rgba(0, 0, 0, 0.4);
+        background: rgba(15, 23, 42, 0.6);
 
         Rectangle {
-            width: 500px;
-            height: 480px;
+            width: 540px;
+            height: 600px;
             x: (parent.width - self.width) / 2;
             y: (parent.height - self.height) / 2;
             background: #ffffff;
-            border-radius: 8px;
-            drop-shadow-blur: 20px;
-            drop-shadow-color: rgba(0,0,0,0.2);
+            border-radius: 12px;
+            drop-shadow-blur: 24px;
+            drop-shadow-color: rgba(0, 0, 0, 0.25);
 
             VerticalLayout {
                 padding: 24px;
                 spacing: 16px;
 
-                Text {
-                    text: "Create Event";
-                    font-size: 24px;
-                    font-weight: 700;
-                }
-
-                VerticalLayout {
-                    spacing: 6px;
-                    Text { text: "Event Title"; font-size: 12px; color: #333; }
-                    LineEdit {
-                        text <=> root.event_title;
-                        placeholder-text: "Enter event title";
-                    }
-                }
-
-                VerticalLayout {
-                    spacing: 6px;
-                    Text { text: "Start Date"; font-size: 12px; color: #333; }
-                    LineEdit {
-                        text: root.selected_date + " 00:00";
-                        read-only: true;
-                    }
-                }
-
-                VerticalLayout {
-                    spacing: 6px;
-                    Text { text: "End Date"; font-size: 12px; color: #333; }
-                    LineEdit {
-                        text: root.selected_date + " 23:59";
-                        read-only: true;
-                    }
-                }
-
-                VerticalLayout {
-                    spacing: 6px;
-                    Text { text: "Description"; font-size: 12px; color: #333; }
-                    LineEdit {
-                        text <=> root.event_description;
-                        placeholder-text: "Enter description";
-                    }
-                }
-
+                // Modal Header
                 HorizontalLayout {
-                    spacing: 12px;
-                    alignment: center;
-                    padding-top: 8px;
-                    Button {
-                        text: "Submit";
-                        primary: true;
-                        clicked => {
-                            root.save-event(root.event_title, root.selected_date + " 00:00", root.selected_date + " 23:59", root.event_description);
+                    alignment: space-between;
+
+                    VerticalLayout {
+                        spacing: 2px;
+                        Text {
+                            text: "Events on " + root.selected_date;
+                            font-size: 20px;
+                            font-weight: 700;
+                            color: #0f172a;
+                        }
+                        Text {
+                            text: "Manage or create events for this day";
+                            font-size: 12px;
+                            color: #64748b;
                         }
                     }
+
+                    Rectangle {
+                        width: 28px;
+                        height: 28px;
+                        border-radius: 14px;
+                        background: #f1f5f9;
+
+                        TouchArea {
+                            clicked => { root.close-popup(); }
+                        }
+
+                        Text {
+                            text: "✕";
+                            font-size: 14px;
+                            color: #64748b;
+                            x: (parent.width - self.width) / 2;
+                            y: (parent.height - self.height) / 2;
+                        }
+                    }
+                }
+
+                // Existing Events List Section
+                VerticalLayout {
+                    spacing: 8px;
+
+                    Text {
+                        text: "SCHEDULED EVENTS";
+                        font-size: 11px;
+                        font-weight: 700;
+                        color: #64748b;
+                    }
+
+                    if root.selected_events.length == 0: Rectangle {
+                        height: 50px;
+                        background: #f8fafc;
+                        border-radius: 6px;
+                        border-width: 1px;
+                        border-color: #e2e8f0;
+
+                        Text {
+                            text: "No events scheduled for this date.";
+                            font-size: 12px;
+                            color: #94a3b8;
+                            x: (parent.width - self.width) / 2;
+                            y: (parent.height - self.height) / 2;
+                        }
+                    }
+
+                    if root.selected_events.length > 0: ScrollView {
+                        height: 120px;
+
+                        VerticalLayout {
+                            spacing: 6px;
+
+                            for evt in root.selected_events: Rectangle {
+                                height: 50px;
+                                background: #f8fafc;
+                                border-radius: 6px;
+                                border-width: 1px;
+                                border-color: #e2e8f0;
+
+                                HorizontalLayout {
+                                    padding-left: 12px;
+                                    padding-right: 12px;
+                                    alignment: space-between;
+
+                                    VerticalLayout {
+                                        alignment: center;
+                                        spacing: 2px;
+
+                                        HorizontalLayout {
+                                            spacing: 6px;
+
+                                            Rectangle {
+                                                width: 10px;
+                                                height: 10px;
+                                                border-radius: 5px;
+                                                y: (parent.height - self.height) / 2;
+                                                background: evt.color == "#10b981" ? #10b981 : (evt.color == "#ef4444" ? #ef4444 : (evt.color == "#8b5cf6" ? #8b5cf6 : (evt.color == "#f59e0b" ? #f59e0b : #3b82f6)));
+                                            }
+
+                                            Text {
+                                                text: evt.title;
+                                                font-size: 13px;
+                                                font-weight: 700;
+                                                color: #1e293b;
+                                            }
+                                        }
+
+                                        Text {
+                                            text: evt.start_time + (evt.end_time != "" ? " - " + evt.end_time : "") + (evt.description != "" ? " (" + evt.description + ")" : "");
+                                            font-size: 11px;
+                                            color: #64748b;
+                                        }
+                                    }
+
+                                    Rectangle {
+                                        width: 60px;
+                                        height: 26px;
+                                        background: #fee2e2;
+                                        border-radius: 4px;
+                                        y: (parent.height - self.height) / 2;
+
+                                        TouchArea {
+                                            clicked => { root.delete-event(evt.id); }
+                                        }
+
+                                        Text {
+                                            text: "Delete";
+                                            font-size: 11px;
+                                            font-weight: 600;
+                                            color: #dc2626;
+                                            x: (parent.width - self.width) / 2;
+                                            y: (parent.height - self.height) / 2;
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+
+                // Add New Event Form Section
+                VerticalLayout {
+                    spacing: 10px;
+
+                    Text {
+                        text: "ADD NEW EVENT";
+                        font-size: 11px;
+                        font-weight: 700;
+                        color: #64748b;
+                    }
+
+                    VerticalLayout {
+                        spacing: 4px;
+                        Text { text: "Title"; font-size: 12px; font-weight: 600; color: #334155; }
+                        LineEdit {
+                            text <=> root.event_title;
+                            placeholder-text: "Meeting, Birthday, Task...";
+                        }
+                    }
+
+                    HorizontalLayout {
+                        spacing: 12px;
+
+                        VerticalLayout {
+                            spacing: 4px;
+                            Text { text: "Start Time"; font-size: 12px; font-weight: 600; color: #334155; }
+                            LineEdit {
+                                text <=> root.event_start_time;
+                                placeholder-text: "09:00";
+                            }
+                        }
+
+                        VerticalLayout {
+                            spacing: 4px;
+                            Text { text: "End Time"; font-size: 12px; font-weight: 600; color: #334155; }
+                            LineEdit {
+                                text <=> root.event_end_time;
+                                placeholder-text: "10:00";
+                            }
+                        }
+                    }
+
+                    VerticalLayout {
+                        spacing: 4px;
+                        Text { text: "Description"; font-size: 12px; font-weight: 600; color: #334155; }
+                        LineEdit {
+                            text <=> root.event_description;
+                            placeholder-text: "Optional description or details";
+                        }
+                    }
+
+                    // Color Selector
+                    VerticalLayout {
+                        spacing: 4px;
+                        Text { text: "Event Color"; font-size: 12px; font-weight: 600; color: #334155; }
+
+                        HorizontalLayout {
+                            spacing: 12px;
+
+                            Rectangle {
+                                width: 28px; height: 28px; border-radius: 14px; background: #3b82f6;
+                                border-width: root.event_color == "#3b82f6" ? 2px : 0px; border-color: #0f172a;
+                                TouchArea { clicked => { root.event_color = "#3b82f6"; } }
+                            }
+                            Rectangle {
+                                width: 28px; height: 28px; border-radius: 14px; background: #10b981;
+                                border-width: root.event_color == "#10b981" ? 2px : 0px; border-color: #0f172a;
+                                TouchArea { clicked => { root.event_color = "#10b981"; } }
+                            }
+                            Rectangle {
+                                width: 28px; height: 28px; border-radius: 14px; background: #8b5cf6;
+                                border-width: root.event_color == "#8b5cf6" ? 2px : 0px; border-color: #0f172a;
+                                TouchArea { clicked => { root.event_color = "#8b5cf6"; } }
+                            }
+                            Rectangle {
+                                width: 28px; height: 28px; border-radius: 14px; background: #ef4444;
+                                border-width: root.event_color == "#ef4444" ? 2px : 0px; border-color: #0f172a;
+                                TouchArea { clicked => { root.event_color = "#ef4444"; } }
+                            }
+                            Rectangle {
+                                width: 28px; height: 28px; border-radius: 14px; background: #f59e0b;
+                                border-width: root.event_color == "#f59e0b" ? 2px : 0px; border-color: #0f172a;
+                                TouchArea { clicked => { root.event_color = "#f59e0b"; } }
+                            }
+                        }
+                    }
+                }
+
+                // Action Buttons
+                HorizontalLayout {
+                    spacing: 12px;
+                    alignment: end;
+                    padding-top: 8px;
+
                     Button {
                         text: "Cancel";
                         clicked => {
                             root.close-popup();
+                        }
+                    }
+
+                    Button {
+                        text: "Save Event";
+                        primary: true;
+                        clicked => {
+                            root.save-event(
+                                root.event_title,
+                                root.selected_date + " " + root.event_start_time,
+                                root.selected_date + " " + root.event_end_time,
+                                root.event_description,
+                                root.event_color
+                            );
                         }
                     }
                 }
