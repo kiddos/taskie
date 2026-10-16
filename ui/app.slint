@@ -21,8 +21,8 @@ export struct DayCell {
 
 export component MainWindow inherits Window {
     title: "Taskie - Calendar & Tasks";
-    min-width: 960px;
-    min-height: 720px;
+    min-width: 980px;
+    min-height: 820px;
     background: #f8fafc;
 
     in-out property <string> current_month_year: "";
@@ -203,6 +203,7 @@ export component MainWindow inherits Window {
 
                 for col in 7: Rectangle {
                     property <int> index: row * 7 + col;
+                    min-height: 110px;
                     border-width: 0.5px;
                     border-color: #e2e8f0;
                     background: root.days[index].is_today ? #f0f9ff : (root.days[index].is_current_month ? #ffffff : #f8fafc);
@@ -215,11 +216,11 @@ export component MainWindow inherits Window {
 
                     // Top row: Day Number badge
                     Rectangle {
-                        x: parent.width - self.width - 6px;
-                        y: 6px;
-                        width: root.days[index].is_today ? 24px : 20px;
-                        height: root.days[index].is_today ? 24px : 20px;
-                        border-radius: 12px;
+                        x: parent.width - self.width - 8px;
+                        y: 8px;
+                        width: root.days[index].is_today ? 26px : 22px;
+                        height: root.days[index].is_today ? 26px : 22px;
+                        border-radius: 13px;
                         background: root.days[index].is_today ? #2563eb : transparent;
 
                         Text {
@@ -234,22 +235,22 @@ export component MainWindow inherits Window {
 
                     // Events preview container inside day cell
                     VerticalLayout {
-                        padding-top: 30px;
-                        padding-left: 4px;
-                        padding-right: 4px;
-                        padding-bottom: 4px;
-                        spacing: 3px;
+                        padding-top: 36px;
+                        padding-left: 6px;
+                        padding-right: 6px;
+                        padding-bottom: 6px;
+                        spacing: 4px;
 
                         for evt[evt_idx] in root.days[index].events: Rectangle {
-                            visible: evt_idx < 3;
-                            height: 18px;
-                            border-radius: 3px;
+                            visible: evt_idx < 4;
+                            height: 20px;
+                            border-radius: 4px;
                             background: evt.color == "#10b981" ? #10b981 : (evt.color == "#ef4444" ? #ef4444 : (evt.color == "#8b5cf6" ? #8b5cf6 : (evt.color == "#f59e0b" ? #f59e0b : #3b82f6)));
 
                             Text {
                                 text: evt.title;
-                                x: 4px;
-                                font-size: 10px;
+                                x: 6px;
+                                font-size: 11px;
                                 font-weight: 600;
                                 color: #ffffff;
                                 overflow: elide;
@@ -257,9 +258,9 @@ export component MainWindow inherits Window {
                             }
                         }
 
-                        if root.days[index].event_count > 3: Text {
-                            text: "+" + (root.days[index].event_count - 3) + " more";
-                            font-size: 10px;
+                        if root.days[index].event_count > 4: Text {
+                            text: "+" + (root.days[index].event_count - 4) + " more";
+                            font-size: 11px;
                             font-weight: 700;
                             color: #2563eb;
                             horizontal-alignment: center;
