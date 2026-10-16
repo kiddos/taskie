@@ -7,6 +7,9 @@ edition = "2024"
 slint = "1.8"
 rusqlite = { version = "0.31", features = ["bundled"] }
 chrono = "0.4"
+dirs = "5.0"
+notify-rust = "4.11"
+ksni = { version = "0.3", default-features = false, features = ["async-io"] }
 
 [build-dependencies]
 slint-build = "1.8"

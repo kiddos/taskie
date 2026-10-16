@@ -1,25 +1,184 @@
 slint::include_modules!();
 
 use chrono::{Datelike, NaiveDate, Utc};
-use rusqlite::{Connection, params};
+use ksni::blocking::TrayMethods;
+use ksni::menu::*;
+use ksni::{MenuItem, Tray};
+use rusqlite::{params, Connection};
 use slint::{ModelRc, SharedString, VecModel};
+use std::path::PathBuf;
 use std::rc::Rc;
 
+#[derive(Debug)]
+pub struct Event {
+    pub id: i64,
+    pub start: Option<String>,
+    pub end: Option<String>,
+    pub title: String,
+    pub description: Option<String>,
+    pub color: Option<String>,
+    pub notified: Option<String>,
+}
+
+fn get_db_path() -> PathBuf {
+    let home = dirs::home_dir().expect("Could not find home directory");
+    home.join(".calendar.db")
+}
+
 fn init_db() -> Connection {
-    let conn = Connection::open("taskie.db").expect("Failed to open SQLite database");
+    let db_path = get_db_path();
+    let conn = Connection::open(&db_path).expect("Failed to open SQLite database");
     conn.execute(
         "CREATE TABLE IF NOT EXISTS events (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             title TEXT NOT NULL,
-            start_date TEXT NOT NULL,
-            end_date TEXT NOT NULL,
+            start_date TEXT,
+            end_date TEXT,
+            start TEXT,
+            end TEXT,
             description TEXT,
-            color TEXT
+            color TEXT,
+            notified TEXT
         )",
         [],
     )
     .expect("Failed to create table");
+
+    let _ = conn.execute("ALTER TABLE events ADD COLUMN notified TEXT", []);
+    let _ = conn.execute("ALTER TABLE events ADD COLUMN start_date TEXT", []);
+    let _ = conn.execute("ALTER TABLE events ADD COLUMN end_date TEXT", []);
+    let _ = conn.execute("ALTER TABLE events ADD COLUMN start TEXT", []);
+    let _ = conn.execute("ALTER TABLE events ADD COLUMN end TEXT", []);
+
     conn
+}
+
+pub fn check_events(conn: &Connection) -> Result<(), Box<dyn std::error::Error>> {
+    let current_time = Utc::now();
+
+    let mut stmt = conn.prepare(
+        "SELECT id, COALESCE(start_date, start) as start_val, COALESCE(end_date, end) as end_val, title, description, color, notified
+         FROM events
+         WHERE notified IS NULL",
+    )?;
+
+    let event_iter = stmt.query_map([], |row| {
+        Ok(Event {
+            id: row.get(0)?,
+            start: row.get(1)?,
+            end: row.get(2)?,
+            title: row.get(3)?,
+            description: row.get(4)?,
+            color: row.get(5)?,
+            notified: row.get(6)?,
+        })
+    })?;
+
+    let mut events_to_notify = Vec::new();
+
+    for event in event_iter {
+        let event = event?;
+        if let Some(ref start_str) = event.start {
+            let is_before_current = if let Ok(start_dt) = chrono::DateTime::parse_from_rfc3339(start_str) {
+                start_dt.with_timezone(&Utc) <= current_time
+            } else if let Ok(start_dt) = chrono::NaiveDateTime::parse_from_str(start_str, "%Y-%m-%dT%H:%M:%S%.fZ") {
+                start_dt.and_utc() <= current_time
+            } else if let Ok(start_dt) = chrono::NaiveDateTime::parse_from_str(start_str, "%Y-%m-%d %H:%M:%S") {
+                start_dt.and_utc() <= current_time
+            } else if let Ok(start_dt) = chrono::NaiveDateTime::parse_from_str(start_str, "%Y-%m-%d %H:%M") {
+                start_dt.and_utc() <= current_time
+            } else {
+                false
+            };
+
+            if is_before_current {
+                events_to_notify.push(event);
+            }
+        }
+    }
+
+    let current_iso = current_time.to_rfc3339();
+
+    for event in events_to_notify {
+        let body = event
+            .description
+            .as_deref()
+            .filter(|s| !s.is_empty())
+            .unwrap_or(&event.title);
+
+        if let Err(e) = notify_rust::Notification::new()
+            .summary(&event.title)
+            .body(body)
+            .sound_name("default")
+            .show()
+        {
+            eprintln!("Failed to send notification for event {}: {}", event.id, e);
+        }
+
+        conn.execute(
+            "UPDATE events SET notified = ? WHERE id = ?",
+            params![current_iso, event.id],
+        )?;
+    }
+
+    Ok(())
+}
+
+struct TaskieTray {
+    ui_handle: slint::Weak<MainWindow>,
+}
+
+impl Tray for TaskieTray {
+    fn id(&self) -> String {
+        "taskie".into()
+    }
+
+    fn title(&self) -> String {
+        "Taskie".into()
+    }
+
+    fn icon_name(&self) -> String {
+        "calendar".into()
+    }
+
+    fn menu(&self) -> Vec<MenuItem<Self>> {
+        vec![
+            StandardItem {
+                label: "show".into(),
+                activate: Box::new(|tray: &mut Self| {
+                    let ui_handle = tray.ui_handle.clone();
+                    let _ = slint::invoke_from_event_loop(move || {
+                        if let Some(ui) = ui_handle.upgrade() {
+                            let _ = ui.show();
+                        }
+                    });
+                }),
+                ..Default::default()
+            }
+            .into(),
+            StandardItem {
+                label: "hide".into(),
+                activate: Box::new(|tray: &mut Self| {
+                    let ui_handle = tray.ui_handle.clone();
+                    let _ = slint::invoke_from_event_loop(move || {
+                        if let Some(ui) = ui_handle.upgrade() {
+                            let _ = ui.hide();
+                        }
+                    });
+                }),
+                ..Default::default()
+            }
+            .into(),
+            StandardItem {
+                label: "Quit".into(),
+                activate: Box::new(|_| {
+                    std::process::exit(0);
+                }),
+                ..Default::default()
+            }
+            .into(),
+        ]
+    }
 }
 
 fn generate_calendar_days(year: i32, month: u32) -> Vec<DayCell> {
@@ -108,6 +267,30 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     let ui = MainWindow::new()?;
 
+    // Allow window to be hidden when closed, remaining in the background
+    ui.window().on_close_requested(move || {
+        slint::CloseRequestResponse::HideWindow
+    });
+
+    // Spawn tray icon service
+    let _tray_handle = TaskieTray {
+        ui_handle: ui.as_weak(),
+    }
+    .spawn();
+
+    // Spawn background notifier thread
+    std::thread::spawn(|| {
+        loop {
+            let db_path = get_db_path();
+            if let Ok(conn) = Connection::open(&db_path) {
+                if let Err(e) = check_events(&conn) {
+                    eprintln!("Error checking events in background thread: {}", e);
+                }
+            }
+            std::thread::sleep(std::time::Duration::from_secs(60));
+        }
+    });
+
     let now = Utc::now().naive_utc().date();
     let mut current_year = now.year();
     let mut current_month = now.month();
@@ -162,7 +345,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         let update_calendar = update_calendar.clone();
         ui.on_today_month(move || {
             let now = Utc::now().naive_utc().date();
-            let year  = now.year();
+            let year = now.year();
             let month = now.month();
             update_calendar(year, month);
         });
@@ -210,4 +393,136 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     ui.run()?;
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use chrono::Duration;
+
+    fn setup_test_db() -> Connection {
+        let conn = Connection::open_in_memory().unwrap();
+        conn.execute(
+            "CREATE TABLE events (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                start TEXT,
+                end TEXT,
+                start_date TEXT,
+                end_date TEXT,
+                title TEXT NOT NULL,
+                description TEXT,
+                color TEXT,
+                notified TEXT
+            )",
+            [],
+        )
+        .unwrap();
+        conn
+    }
+
+    #[test]
+    fn test_check_events_notifies_past_unnotified_events() {
+        let conn = setup_test_db();
+        let past_time = (Utc::now() - Duration::minutes(35)).to_rfc3339();
+        let end_time = Utc::now().to_rfc3339();
+
+        conn.execute(
+            "INSERT INTO events (start, end, title, description, color) VALUES (?, ?, ?, ?, ?)",
+            params![past_time, end_time, "Test Meeting", "Test Description", "blue"],
+        )
+        .unwrap();
+
+        check_events(&conn).unwrap();
+
+        let notified: Option<String> = conn
+            .query_row("SELECT notified FROM events WHERE id = 1", [], |row| row.get(0))
+            .unwrap();
+
+        assert!(notified.is_some());
+    }
+
+    #[test]
+    fn test_check_events_skips_future_events() {
+        let conn = setup_test_db();
+        let future_time = (Utc::now() + Duration::hours(1)).to_rfc3339();
+        let end_time = (Utc::now() + Duration::hours(2)).to_rfc3339();
+
+        conn.execute(
+            "INSERT INTO events (start, end, title, description, color) VALUES (?, ?, ?, ?, ?)",
+            params![future_time, end_time, "Future Meeting", "Description", "blue"],
+        )
+        .unwrap();
+
+        check_events(&conn).unwrap();
+
+        let notified: Option<String> = conn
+            .query_row("SELECT notified FROM events WHERE id = 1", [], |row| row.get(0))
+            .unwrap();
+
+        assert!(notified.is_none());
+    }
+
+    #[test]
+    fn test_check_events_skips_already_notified_events() {
+        let conn = setup_test_db();
+        let past_time = (Utc::now() - Duration::minutes(40)).to_rfc3339();
+        let end_time = Utc::now().to_rfc3339();
+        let notified_time = (Utc::now() - Duration::minutes(10)).to_rfc3339();
+
+        conn.execute(
+            "INSERT INTO events (start, end, title, description, color, notified) VALUES (?, ?, ?, ?, ?, ?)",
+            params![past_time, end_time, "Notified Meeting", "Description", "blue", notified_time],
+        )
+        .unwrap();
+
+        check_events(&conn).unwrap();
+
+        let notified: Option<String> = conn
+            .query_row("SELECT notified FROM events WHERE id = 1", [], |row| row.get(0))
+            .unwrap();
+
+        assert_eq!(notified, Some(notified_time));
+    }
+
+    #[test]
+    fn test_check_events_fallback_description_to_title() {
+        let conn = setup_test_db();
+        let past_time = (Utc::now() - Duration::minutes(35)).to_rfc3339();
+        let end_time = Utc::now().to_rfc3339();
+
+        conn.execute(
+            "INSERT INTO events (start, end, title, description, color) VALUES (?, ?, ?, NULL, ?)",
+            params![past_time, end_time, "Meeting without description", "blue"],
+        )
+        .unwrap();
+
+        check_events(&conn).unwrap();
+
+        let notified: Option<String> = conn
+            .query_row("SELECT notified FROM events WHERE id = 1", [], |row| row.get(0))
+            .unwrap();
+
+        assert!(notified.is_some());
+    }
+
+    #[test]
+    fn test_check_events_with_start_date_format() {
+        let conn = setup_test_db();
+        let past_date = (Utc::now() - Duration::minutes(10)).format("%Y-%m-%d %H:%M").to_string();
+        let end_date = Utc::now().format("%Y-%m-%d %H:%M").to_string();
+
+        conn.execute(
+            "INSERT INTO events (start_date, end_date, title, description, color) VALUES (?, ?, ?, ?, ?)",
+            params![past_date, end_date, "Date Format Meeting", "Desc", "blue"],
+        )
+        .unwrap();
+
+        check_events(&conn).unwrap();
+
+        let notified: Option<String> = conn
+            .query_row("SELECT notified FROM events WHERE id = 1", [], |row| row.get(0))
+            .unwrap();
+
+        assert!(notified.is_some());
+    }
 }
