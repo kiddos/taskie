@@ -1,6 +1,6 @@
 slint::include_modules!();
 
-use chrono::{Datelike, NaiveDate, Utc};
+use chrono::{Datelike, NaiveDate, Utc, Local};
 use ksni::blocking::TrayMethods;
 use ksni::menu::*;
 use ksni::{MenuItem, Tray};
@@ -214,7 +214,7 @@ fn generate_calendar_days(year: i32, month: u32) -> Vec<DayCell> {
     .unwrap()
     .day() as i32;
 
-    let today = Utc::now().naive_utc().date();
+    let today = Local::now().date_naive();
     let mut cells = Vec::new();
 
     // Previous month trailing days
@@ -287,7 +287,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                     eprintln!("Error checking events in background thread: {}", e);
                 }
             }
-            std::thread::sleep(std::time::Duration::from_secs(60));
+            std::thread::sleep(std::time::Duration::from_secs(10));
         }
     });
 
@@ -344,7 +344,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     {
         let update_calendar = update_calendar.clone();
         ui.on_today_month(move || {
-            let now = Utc::now().naive_utc().date();
+            let now = Local::now().date_naive();
             let year = now.year();
             let month = now.month();
             update_calendar(year, month);
