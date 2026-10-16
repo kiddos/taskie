@@ -1,0 +1,215 @@
+import { Button, LineEdit } from "std-widgets.slint";
+
+export struct DayCell {
+    day_number: string,
+    is_current_month: bool,
+    is_today: bool,
+    date_str: string,
+}
+
+export component MainWindow inherits Window {
+    title: "taskie";
+    width: 920px;
+    height: 720px;
+
+    in-out property <string> current_month_year: "2026 October";
+    in-out property <[DayCell]> days;
+    in-out property <bool> show_popup: false;
+    in-out property <string> selected_date: "";
+    in-out property <string> event_title: "";
+    in-out property <string> event_description: "";
+
+    callback date-clicked(string);
+    callback save-event(string, string, string, string);
+    callback close-popup();
+    callback next-month();
+    callback prev-month();
+    callback today-month();
+
+    VerticalLayout {
+        // Menu bar
+        HorizontalLayout {
+            padding: 8px;
+            spacing: 16px;
+            Text { text: "File"; font-size: 14px; }
+            Text { text: "View"; font-size: 14px; }
+            Text { text: "Help"; font-size: 14px; }
+        }
+
+        // Toolbar
+        HorizontalLayout {
+            padding: 10px;
+            spacing: 10px;
+            alignment: space-between;
+
+            HorizontalLayout {
+                spacing: 8px;
+                Button { text: "Today"; clicked => { root.today-month(); } }
+                Button { text: "Back"; clicked => { root.prev-month(); } }
+                Button { text: "Next"; clicked => { root.next-month(); } }
+            }
+
+            Text {
+                text: root.current_month_year;
+                font-size: 18px;
+                font-weight: 700;
+                vertical-alignment: center;
+            }
+
+            HorizontalLayout {
+                spacing: 4px;
+                Rectangle {
+                    width: 70px; height: 32px;
+                    background: #dcdcdc;
+                    border-radius: 4px;
+                    Text { text: "Month"; y: (parent.height - self.height)/2; x: (parent.width - self.width)/2; }
+                }
+                Rectangle {
+                    width: 60px; height: 32px;
+                    background: #f0f0f0;
+                    border-radius: 4px;
+                    Text { text: "Week"; y: (parent.height - self.height)/2; x: (parent.width - self.width)/2; }
+                }
+                Rectangle {
+                    width: 50px; height: 32px;
+                    background: #f0f0f0;
+                    border-radius: 4px;
+                    Text { text: "Day"; y: (parent.height - self.height)/2; x: (parent.width - self.width)/2; }
+                }
+                Rectangle {
+                    width: 70px; height: 32px;
+                    background: #f0f0f0;
+                    border-radius: 4px;
+                    Text { text: "Agenda"; y: (parent.height - self.height)/2; x: (parent.width - self.width)/2; }
+                }
+            }
+        }
+
+        // Days of week header
+        HorizontalLayout {
+            height: 30px;
+            for day-name in ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"]: Rectangle {
+                border-width: 0.5px;
+                border-color: #dcdcdc;
+                Text {
+                    text: day-name;
+                    y: (parent.height - self.height)/2;
+                    x: (parent.width - self.width)/2;
+                    font-weight: 600;
+                    font-size: 12px;
+                }
+            }
+        }
+
+        // Calendar Grid (6 rows x 7 cols)
+        VerticalLayout {
+            for row in 6: HorizontalLayout {
+                for col in 7: Rectangle {
+                    property <int> index: row * 7 + col;
+                    border-width: 0.5px;
+                    border-color: #dcdcdc;
+                    background: root.days[index].is_today ? #eaf4fc : (root.days[index].is_current_month ? #ffffff : #eaeaea);
+
+                    TouchArea {
+                        clicked => {
+                            root.date-clicked(root.days[index].date_str);
+                        }
+                    }
+
+                    Text {
+                        text: root.days[index].day_number;
+                        x: parent.width - self.width - 8px;
+                        y: 8px;
+                        font-size: 12px;
+                        color: root.days[index].is_current_month ? #111111 : #777777;
+                    }
+                }
+            }
+        }
+    }
+
+    // Popup Dialog
+    Rectangle {
+        visible: root.show_popup;
+        width: parent.width;
+        height: parent.height;
+        background: rgba(0, 0, 0, 0.4);
+
+        Rectangle {
+            width: 500px;
+            height: 480px;
+            x: (parent.width - self.width) / 2;
+            y: (parent.height - self.height) / 2;
+            background: #ffffff;
+            border-radius: 8px;
+            drop-shadow-blur: 20px;
+            drop-shadow-color: rgba(0,0,0,0.2);
+
+            VerticalLayout {
+                padding: 24px;
+                spacing: 16px;
+
+                Text {
+                    text: "Create Event";
+                    font-size: 24px;
+                    font-weight: 700;
+                }
+
+                VerticalLayout {
+                    spacing: 6px;
+                    Text { text: "Event Title"; font-size: 12px; color: #333; }
+                    LineEdit {
+                        text <=> root.event_title;
+                        placeholder-text: "Enter event title";
+                    }
+                }
+
+                VerticalLayout {
+                    spacing: 6px;
+                    Text { text: "Start Date"; font-size: 12px; color: #333; }
+                    LineEdit {
+                        text: root.selected_date + " 00:00";
+                        read-only: true;
+                    }
+                }
+
+                VerticalLayout {
+                    spacing: 6px;
+                    Text { text: "End Date"; font-size: 12px; color: #333; }
+                    LineEdit {
+                        text: root.selected_date + " 23:59";
+                        read-only: true;
+                    }
+                }
+
+                VerticalLayout {
+                    spacing: 6px;
+                    Text { text: "Description"; font-size: 12px; color: #333; }
+                    LineEdit {
+                        text <=> root.event_description;
+                        placeholder-text: "Enter description";
+                    }
+                }
+
+                HorizontalLayout {
+                    spacing: 12px;
+                    alignment: center;
+                    padding-top: 8px;
+                    Button {
+                        text: "Submit";
+                        primary: true;
+                        clicked => {
+                            root.save-event(root.event_title, root.selected_date + " 00:00", root.selected_date + " 23:59", root.event_description);
+                        }
+                    }
+                    Button {
+                        text: "Cancel";
+                        clicked => {
+                            root.close-popup();
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
