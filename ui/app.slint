@@ -209,6 +209,7 @@ export component MainWindow inherits Window {
                     background: root.days[index].is_today ? #f0f9ff : (root.days[index].is_current_month ? #ffffff : #f8fafc);
 
                     TouchArea {
+                        enabled: !root.show_popup;
                         clicked => {
                             root.date-clicked(root.days[index].date_str);
                         }
