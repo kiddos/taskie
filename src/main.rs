@@ -247,10 +247,19 @@ impl Tray for TaskieTray {
         "calendar".into()
     }
 
+    fn activate(&mut self, _x: i32, _y: i32) {
+        let ui_handle = self.ui_handle.clone();
+        let _ = slint::invoke_from_event_loop(move || {
+            if let Some(ui) = ui_handle.upgrade() {
+                let _ = ui.show();
+            }
+        });
+    }
+
     fn menu(&self) -> Vec<MenuItem<Self>> {
         vec![
             StandardItem {
-                label: "show".into(),
+                label: "Show".into(),
                 activate: Box::new(|tray: &mut Self| {
                     let ui_handle = tray.ui_handle.clone();
                     let _ = slint::invoke_from_event_loop(move || {
@@ -263,7 +272,7 @@ impl Tray for TaskieTray {
             }
             .into(),
             StandardItem {
-                label: "hide".into(),
+                label: "Hide".into(),
                 activate: Box::new(|tray: &mut Self| {
                     let ui_handle = tray.ui_handle.clone();
                     let _ = slint::invoke_from_event_loop(move || {
@@ -375,7 +384,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     let ui = MainWindow::new()?;
 
-    // Allow window to be hidden when closed, remaining in the background
+    // Minimize / hide to tray when user closes the window, keeping background notifier running
     ui.window().on_close_requested(move || {
         slint::CloseRequestResponse::HideWindow
     });
