@@ -287,7 +287,9 @@ impl Tray for TaskieTray {
             StandardItem {
                 label: "Quit".into(),
                 activate: Box::new(|_| {
-                    std::process::exit(0);
+                    let _ = slint::invoke_from_event_loop(|| {
+                        let _ = slint::quit_event_loop();
+                    });
                 }),
                 ..Default::default()
             }
@@ -572,7 +574,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         });
     }
 
-    ui.run()?;
+    ui.show()?;
+    slint::run_event_loop_until_quit()?;
     Ok(())
 }
 
