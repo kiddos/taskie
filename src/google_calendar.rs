@@ -110,7 +110,7 @@ pub fn get_valid_access_token(conn: &Connection) -> Result<String, String> {
 
 pub fn start_oauth_flow(client_id: &str, client_secret: &str) -> Result<(String, String, i64), String> {
     let auth_url = format!(
-        "https://accounts.google.com/o/oauth2/v2/auth?client_id={}&redirect_uri={}&response_type=code&scope={}&access_type=offline&prompt=consent",
+        "https://accounts.google.com/o/oauth2/v2/auth?client_id={}&redirect_uri={}&response_type=code&scope={}&access_type=offline&prompt=select_account%20consent",
         urlencoding::encode(client_id),
         urlencoding::encode(REDIRECT_URI),
         urlencoding::encode("https://www.googleapis.com/auth/calendar")

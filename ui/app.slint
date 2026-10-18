@@ -222,7 +222,7 @@ export component MainWindow inherits Window {
                         }
 
                         Text {
-                            text: root.is_google_connected ? "✓ Google Connected" : "Connect Google";
+                            text: root.is_google_connected ? "✓ Google Connected" : "Connect to Google";
                             color: #ffffff;
                             font-weight: 600;
                             font-size: 12px;
@@ -478,7 +478,7 @@ export component MainWindow inherits Window {
                     }
 
                     if !root.is_google_connected: Button {
-                        text: "Authenticate with Google";
+                        text: "Connect to Google";
                         primary: true;
                         clicked => {
                             root.connect-google(root.google_client_id, root.google_client_secret);
