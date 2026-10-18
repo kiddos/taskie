@@ -31,6 +31,8 @@ export component MainWindow inherits Window {
     in-out property <bool> show_popup: false;
     in-out property <bool> show_google_popup: false;
     in-out property <bool> is_google_connected: false;
+    in-out property <string> google_client_id: "";
+    in-out property <string> google_client_secret: "";
     in-out property <string> google_status_message: "";
     in-out property <string> selected_date: "";
     in-out property <[CalendarEvent]> selected_events;
@@ -47,7 +49,7 @@ export component MainWindow inherits Window {
     callback next-month();
     callback prev-month();
     callback today-month();
-    callback connect-google();
+    callback connect-google(string, string);
     callback disconnect-google();
     callback sync-google();
     callback open-google-popup();
@@ -209,24 +211,18 @@ export component MainWindow inherits Window {
                     Rectangle {
                         width: 140px;
                         height: 34px;
-                        background: root.is_google_connected ? #15803d : #2563eb;
+                        background: root.is_google_connected ? #15803d : #1e293b;
                         border-radius: 6px;
                         border-width: 1px;
-                        border-color: root.is_google_connected ? #22c55e : #3b82f6;
+                        border-color: root.is_google_connected ? #22c55e : #334155;
                         y: (parent.height - self.height) / 2;
 
                         TouchArea {
-                            clicked => {
-                                if root.is_google_connected {
-                                    root.open-google-popup();
-                                } else {
-                                    root.connect-google();
-                                }
-                            }
+                            clicked => { root.open-google-popup(); }
                         }
 
                         Text {
-                            text: root.is_google_connected ? "✓ Google Connected" : "Connect to Google";
+                            text: root.is_google_connected ? "✓ Google Connected" : "Connect Google";
                             color: #ffffff;
                             font-weight: 600;
                             font-size: 12px;
@@ -412,6 +408,35 @@ export component MainWindow inherits Window {
                     }
                 }
 
+                if !root.is_google_connected: VerticalLayout {
+                    spacing: 12px;
+
+                    VerticalLayout {
+                        spacing: 4px;
+                        Text { text: "Google OAuth Client ID"; font-size: 12px; font-weight: 600; color: #334155; }
+                        LineEdit {
+                            text <=> root.google_client_id;
+                            placeholder-text: "xxxx.apps.googleusercontent.com";
+                        }
+                    }
+
+                    VerticalLayout {
+                        spacing: 4px;
+                        Text { text: "Google OAuth Client Secret"; font-size: 12px; font-weight: 600; color: #334155; }
+                        LineEdit {
+                            text <=> root.google_client_secret;
+                            input-type: password;
+                            placeholder-text: "Client Secret";
+                        }
+                    }
+
+                    Text {
+                        text: "Clicking 'Connect' will open your default browser for Google OAuth login.";
+                        font-size: 11px;
+                        color: #64748b;
+                        wrap: word-wrap;
+                    }
+                }
 
                 if root.is_google_connected: VerticalLayout {
                     spacing: 12px;
@@ -453,10 +478,10 @@ export component MainWindow inherits Window {
                     }
 
                     if !root.is_google_connected: Button {
-                        text: "Connect to Google";
+                        text: "Authenticate with Google";
                         primary: true;
                         clicked => {
-                            root.connect-google();
+                            root.connect-google(root.google_client_id, root.google_client_secret);
                         }
                     }
 
