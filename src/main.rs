@@ -515,8 +515,6 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     {
         let db = db_rc.lock().unwrap();
         if let Some(auth) = get_google_auth(&db) {
-            ui.set_google_client_id(auth.client_id.into());
-            ui.set_google_client_secret(auth.client_secret.into());
             if auth.access_token.is_some() {
                 ui.set_is_google_connected(true);
                 // Perform initial sync in background thread so app startup isn't blocked
@@ -574,21 +572,20 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         let db_rc = db_rc.clone();
         let current_year = current_year.clone();
         let current_month = current_month.clone();
-        ui.on_connect_google(move |client_id, client_secret| {
-            if client_id.trim().is_empty() || client_secret.trim().is_empty() {
-                if let Some(ui) = ui_handle.upgrade() {
-                    ui.set_google_status_message("Client ID and Client Secret are required.".into());
-                }
-                return;
-            }
-
+        ui.on_connect_google(move || {
             let ui_handle = ui_handle.clone();
             let db_rc = db_rc.clone();
             let cur_y = current_year.get();
             let cur_m = current_month.get();
 
-            let c_id = client_id.to_string();
-            let c_sec = client_secret.to_string();
+            let (c_id, c_sec) = {
+                let db = db_rc.lock().unwrap();
+                if let Some(auth) = get_google_auth(&db) {
+                    (auth.client_id, auth.client_secret)
+                } else {
+                    google_calendar::get_default_oauth_credentials()
+                }
+            };
 
             if let Some(ui) = ui_handle.upgrade() {
                 ui.set_google_status_message("Opening browser for OAuth authentication...".into());

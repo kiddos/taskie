@@ -108,6 +108,14 @@ pub fn get_valid_access_token(conn: &Connection) -> Result<String, String> {
     Ok(token_resp.access_token)
 }
 
+pub fn get_default_oauth_credentials() -> (String, String) {
+    let client_id = std::env::var("GOOGLE_CLIENT_ID")
+        .unwrap_or_else(|_| "100000000000-taskiedefaultclientid.apps.googleusercontent.com".to_string());
+    let client_secret = std::env::var("GOOGLE_CLIENT_SECRET")
+        .unwrap_or_else(|_| "GOCSPX-taskiedefaultclientsecret".to_string());
+    (client_id, client_secret)
+}
+
 pub fn start_oauth_flow(client_id: &str, client_secret: &str) -> Result<(String, String, i64), String> {
     let auth_url = format!(
         "https://accounts.google.com/o/oauth2/v2/auth?client_id={}&redirect_uri={}&response_type=code&scope={}&access_type=offline&prompt=select_account%20consent",
