@@ -1,5 +1,7 @@
 slint::include_modules!();
 
+pub mod google_calendar;
+
 use chrono::{Datelike, Local, NaiveDate, Utc};
 use ksni::blocking::TrayMethods;
 use ksni::menu::*;
@@ -19,6 +21,16 @@ pub struct Event {
     pub description: Option<String>,
     pub color: Option<String>,
     pub notified: Option<String>,
+    pub google_event_id: Option<String>,
+}
+
+#[derive(Debug, Clone)]
+pub struct GoogleAuthInfo {
+    pub client_id: String,
+    pub client_secret: String,
+    pub access_token: Option<String>,
+    pub refresh_token: Option<String>,
+    pub expires_at: Option<i64>,
 }
 
 fn get_db_path() -> PathBuf {
@@ -50,15 +62,73 @@ fn init_db() -> Connection {
     let _ = conn.execute("ALTER TABLE events ADD COLUMN end_date TEXT", []);
     let _ = conn.execute("ALTER TABLE events ADD COLUMN start TEXT", []);
     let _ = conn.execute("ALTER TABLE events ADD COLUMN end TEXT", []);
+    let _ = conn.execute("ALTER TABLE events ADD COLUMN google_event_id TEXT", []);
+
+    conn.execute(
+        "CREATE TABLE IF NOT EXISTS google_auth (
+            id INTEGER PRIMARY KEY CHECK (id = 1),
+            client_id TEXT NOT NULL,
+            client_secret TEXT NOT NULL,
+            access_token TEXT,
+            refresh_token TEXT,
+            expires_at INTEGER
+        )",
+        [],
+    )
+    .expect("Failed to create google_auth table");
 
     conn
+}
+
+pub fn get_google_auth(conn: &Connection) -> Option<GoogleAuthInfo> {
+    let mut stmt = conn
+        .prepare("SELECT client_id, client_secret, access_token, refresh_token, expires_at FROM google_auth WHERE id = 1")
+        .ok()?;
+    stmt.query_row([], |row| {
+        Ok(GoogleAuthInfo {
+            client_id: row.get(0)?,
+            client_secret: row.get(1)?,
+            access_token: row.get(2)?,
+            refresh_token: row.get(3)?,
+            expires_at: row.get(4)?,
+        })
+    })
+    .ok()
+}
+
+pub fn save_google_credentials(conn: &Connection, client_id: &str, client_secret: &str) {
+    let _ = conn.execute(
+        "INSERT INTO google_auth (id, client_id, client_secret) VALUES (1, ?1, ?2)
+         ON CONFLICT(id) DO UPDATE SET client_id = ?1, client_secret = ?2",
+        params![client_id, client_secret],
+    );
+}
+
+pub fn save_google_tokens(conn: &Connection, access_token: &str, refresh_token: Option<&str>, expires_in_secs: i64) {
+    let now = Utc::now().timestamp();
+    let expires_at = now + expires_in_secs;
+    if let Some(rf) = refresh_token {
+        let _ = conn.execute(
+            "UPDATE google_auth SET access_token = ?1, refresh_token = ?2, expires_at = ?3 WHERE id = 1",
+            params![access_token, rf, expires_at],
+        );
+    } else {
+        let _ = conn.execute(
+            "UPDATE google_auth SET access_token = ?1, expires_at = ?2 WHERE id = 1",
+            params![access_token, expires_at],
+        );
+    }
+}
+
+pub fn clear_google_auth(conn: &Connection) {
+    let _ = conn.execute("DELETE FROM google_auth WHERE id = 1", []);
 }
 
 pub fn check_events(conn: &Connection) -> Result<(), Box<dyn std::error::Error>> {
     let current_time = Utc::now();
 
     let mut stmt = conn.prepare(
-        "SELECT id, COALESCE(start_date, start) as start_val, COALESCE(end_date, end) as end_val, title, description, color, notified
+        "SELECT id, COALESCE(start_date, start) as start_val, COALESCE(end_date, end) as end_val, title, description, color, notified, google_event_id
          FROM events
          WHERE notified IS NULL",
     )?;
@@ -72,6 +142,7 @@ pub fn check_events(conn: &Connection) -> Result<(), Box<dyn std::error::Error>>
             description: row.get(4)?,
             color: row.get(5)?,
             notified: row.get(6)?,
+            google_event_id: row.get(7)?,
         })
     })?;
 
@@ -127,7 +198,7 @@ pub fn check_events(conn: &Connection) -> Result<(), Box<dyn std::error::Error>>
 
 fn fetch_all_events(conn: &Connection) -> Vec<Event> {
     let mut stmt = match conn.prepare(
-        "SELECT id, COALESCE(start_date, start) as start_val, COALESCE(end_date, end) as end_val, title, description, color, notified FROM events"
+        "SELECT id, COALESCE(start_date, start) as start_val, COALESCE(end_date, end) as end_val, title, description, color, notified, google_event_id FROM events"
     ) {
         Ok(s) => s,
         Err(_) => return Vec::new(),
@@ -142,6 +213,7 @@ fn fetch_all_events(conn: &Connection) -> Vec<Event> {
             description: row.get(4)?,
             color: row.get(5)?,
             notified: row.get(6)?,
+            google_event_id: row.get(7)?,
         })
     });
 
@@ -382,7 +454,7 @@ fn generate_calendar_days(year: i32, month: u32, db_events: &[Event]) -> Vec<Day
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     let db = init_db();
-    let db_rc = Rc::new(std::cell::RefCell::new(db));
+    let db_rc = std::sync::Arc::new(std::sync::Mutex::new(db));
 
     let ui = MainWindow::new()?;
 
@@ -423,7 +495,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             current_year.set(year);
             current_month.set(month);
             if let Some(ui) = ui_handle.upgrade() {
-                let db = db_rc.borrow();
+                let db = db_rc.lock().unwrap();
                 let events = fetch_all_events(&db);
 
                 let month_name = NaiveDate::from_ymd_opt(year, month, 1)
@@ -438,6 +510,198 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             }
         }
     };
+
+    // Initial check for Google connection status & perform auto sync if connected
+    {
+        let db = db_rc.lock().unwrap();
+        if let Some(auth) = get_google_auth(&db) {
+            ui.set_google_client_id(auth.client_id.into());
+            ui.set_google_client_secret(auth.client_secret.into());
+            if auth.access_token.is_some() {
+                ui.set_is_google_connected(true);
+                // Perform initial sync in background thread so app startup isn't blocked
+                let db_rc_sync = db_rc.clone();
+                let ui_handle_sync = ui.as_weak();
+                let cur_y = current_year.get();
+                let cur_m = current_month.get();
+                std::thread::spawn(move || {
+                    {
+                        let db = db_rc_sync.lock().unwrap();
+                        let _ = google_calendar::sync_from_google_calendar(&db);
+                    }
+                    let db_rc_inner = db_rc_sync.clone();
+                    let _ = slint::invoke_from_event_loop(move || {
+                        if let Some(ui) = ui_handle_sync.upgrade() {
+                            let db = db_rc_inner.lock().unwrap();
+                            let events = fetch_all_events(&db);
+                            let month_name = NaiveDate::from_ymd_opt(cur_y, cur_m, 1)
+                                .unwrap()
+                                .format("%Y %B")
+                                .to_string();
+                            ui.set_current_month_year(month_name.into());
+
+                            let days = generate_calendar_days(cur_y, cur_m, &events);
+                            let model = Rc::new(VecModel::from(days));
+                            ui.set_days(ModelRc::from(model));
+                        }
+                    });
+                });
+            }
+        }
+    }
+
+    // Google Calendar UI Callbacks
+    {
+        let ui_handle = ui.as_weak();
+        ui.on_open_google_popup(move || {
+            if let Some(ui) = ui_handle.upgrade() {
+                ui.set_show_google_popup(true);
+            }
+        });
+    }
+
+    {
+        let ui_handle = ui.as_weak();
+        ui.on_close_google_popup(move || {
+            if let Some(ui) = ui_handle.upgrade() {
+                ui.set_show_google_popup(false);
+            }
+        });
+    }
+
+    {
+        let ui_handle = ui.as_weak();
+        let db_rc = db_rc.clone();
+        let current_year = current_year.clone();
+        let current_month = current_month.clone();
+        ui.on_connect_google(move |client_id, client_secret| {
+            if client_id.trim().is_empty() || client_secret.trim().is_empty() {
+                if let Some(ui) = ui_handle.upgrade() {
+                    ui.set_google_status_message("Client ID and Client Secret are required.".into());
+                }
+                return;
+            }
+
+            let ui_handle = ui_handle.clone();
+            let db_rc = db_rc.clone();
+            let cur_y = current_year.get();
+            let cur_m = current_month.get();
+
+            let c_id = client_id.to_string();
+            let c_sec = client_secret.to_string();
+
+            if let Some(ui) = ui_handle.upgrade() {
+                ui.set_google_status_message("Opening browser for OAuth authentication...".into());
+            }
+
+            std::thread::spawn(move || {
+                match google_calendar::start_oauth_flow(&c_id, &c_sec) {
+                    Ok((access_token, refresh_token, expires_in)) => {
+                        let sync_res = {
+                            let db = db_rc.lock().unwrap();
+                            save_google_credentials(&db, &c_id, &c_sec);
+                            save_google_tokens(
+                                &db,
+                                &access_token,
+                                if refresh_token.is_empty() { None } else { Some(&refresh_token) },
+                                expires_in,
+                            );
+
+                            // Trigger sync immediately after authentication
+                            google_calendar::sync_from_google_calendar(&db)
+                        };
+
+                        let msg = match sync_res {
+                            Ok(count) => format!("Connected! Synced {} events.", count),
+                            Err(e) => format!("Connected, but sync had warning: {}", e),
+                        };
+
+                        let db_rc_inner = db_rc.clone();
+                        let _ = slint::invoke_from_event_loop(move || {
+                            if let Some(ui) = ui_handle.upgrade() {
+                                ui.set_is_google_connected(true);
+                                ui.set_google_status_message(msg.into());
+                                let db = db_rc_inner.lock().unwrap();
+                                let events = fetch_all_events(&db);
+                                let month_name = NaiveDate::from_ymd_opt(cur_y, cur_m, 1)
+                                    .unwrap()
+                                    .format("%Y %B")
+                                    .to_string();
+                                ui.set_current_month_year(month_name.into());
+
+                                let days = generate_calendar_days(cur_y, cur_m, &events);
+                                let model = Rc::new(VecModel::from(days));
+                                ui.set_days(ModelRc::from(model));
+                            }
+                        });
+                    }
+                    Err(e) => {
+                        let err_msg = format!("Authentication failed: {}", e);
+                        let _ = slint::invoke_from_event_loop(move || {
+                            if let Some(ui) = ui_handle.upgrade() {
+                                ui.set_google_status_message(err_msg.into());
+                            }
+                        });
+                    }
+                }
+            });
+        });
+    }
+
+    {
+        let ui_handle = ui.as_weak();
+        let db_rc = db_rc.clone();
+        ui.on_disconnect_google(move || {
+            let db = db_rc.lock().unwrap();
+            clear_google_auth(&db);
+            if let Some(ui) = ui_handle.upgrade() {
+                ui.set_is_google_connected(false);
+                ui.set_google_status_message("Disconnected from Google Calendar.".into());
+            }
+        });
+    }
+
+    {
+        let ui_handle = ui.as_weak();
+        let db_rc = db_rc.clone();
+        let current_year = current_year.clone();
+        let current_month = current_month.clone();
+        ui.on_sync_google(move || {
+            let ui_handle = ui_handle.clone();
+            let db_rc = db_rc.clone();
+            let cur_y = current_year.get();
+            let cur_m = current_month.get();
+
+            std::thread::spawn(move || {
+                let result = {
+                    let db = db_rc.lock().unwrap();
+                    google_calendar::sync_from_google_calendar(&db)
+                };
+                let msg = match result {
+                    Ok(count) => format!("Synced {} events from Google Calendar.", count),
+                    Err(e) => format!("Sync error: {}", e),
+                };
+
+                let db_rc_inner = db_rc.clone();
+                let _ = slint::invoke_from_event_loop(move || {
+                    if let Some(ui) = ui_handle.upgrade() {
+                        ui.set_google_status_message(msg.into());
+                        let db = db_rc_inner.lock().unwrap();
+                        let events = fetch_all_events(&db);
+                        let month_name = NaiveDate::from_ymd_opt(cur_y, cur_m, 1)
+                            .unwrap()
+                            .format("%Y %B")
+                            .to_string();
+                        ui.set_current_month_year(month_name.into());
+
+                        let days = generate_calendar_days(cur_y, cur_m, &events);
+                        let model = Rc::new(VecModel::from(days));
+                        ui.set_days(ModelRc::from(model));
+                    }
+                });
+            });
+        });
+    }
 
     update_calendar(current_year.get(), current_month.get());
 
@@ -491,7 +755,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         move |date_str: &str| {
             if let Some(ui) = ui_handle.upgrade() {
                 if let Ok(target_date) = NaiveDate::parse_from_str(date_str, "%Y-%m-%d") {
-                    let db = db_rc.borrow();
+                    let db = db_rc.lock().unwrap();
                     let events = fetch_all_events(&db);
                     let sel_events = get_events_for_date(&events, target_date);
                     ui.set_selected_events(ModelRc::from(Rc::new(VecModel::from(sel_events))));
@@ -533,13 +797,29 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         let current_month = current_month.clone();
         ui.on_save_event(move |title, start, end, desc, color| {
             if let Some(ui) = ui_handle.upgrade() {
-                let db = db_rc.borrow();
+                let db = db_rc.lock().unwrap();
+
+                // If Google Calendar is connected, attempt to push event to Google Calendar
+                let google_event_id = if get_google_auth(&db).is_some() {
+                    match google_calendar::push_event_to_google_calendar(&db, title.as_str(), start.as_str(), end.as_str(), desc.as_str()) {
+                        Ok(gid) => gid,
+                        Err(e) => {
+                            eprintln!("Failed to push event to Google Calendar: {}", e);
+                            None
+                        }
+                    }
+                } else {
+                    None
+                };
+
                 db.execute(
-                    "INSERT INTO events (title, start_date, end_date, description, color) VALUES (?1, ?2, ?3, ?4, ?5)",
-                    params![title.as_str(), start.as_str(), end.as_str(), desc.as_str(), color.as_str()],
+                    "INSERT INTO events (title, start_date, end_date, start, end, description, color, google_event_id) VALUES (?1, ?2, ?3, ?2, ?3, ?4, ?5, ?6)",
+                    params![title.as_str(), start.as_str(), end.as_str(), desc.as_str(), color.as_str(), google_event_id],
                 ).expect("Failed to insert event into SQLite");
 
                 let selected_date = ui.get_selected_date().to_string();
+
+                drop(db); // release lock before updating calendar
 
                 update_calendar(current_year.get(), current_month.get());
                 refresh_selected_events(&selected_date);
@@ -560,13 +840,15 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         let current_month = current_month.clone();
         ui.on_delete_event(move |event_id| {
             if let Some(ui) = ui_handle.upgrade() {
-                let db = db_rc.borrow();
+                let db = db_rc.lock().unwrap();
                 db.execute(
                     "DELETE FROM events WHERE id = ?1",
                     params![event_id],
                 ).expect("Failed to delete event from SQLite");
 
                 let selected_date = ui.get_selected_date().to_string();
+
+                drop(db); // release lock before updating calendar
 
                 update_calendar(current_year.get(), current_month.get());
                 refresh_selected_events(&selected_date);
@@ -596,12 +878,45 @@ mod tests {
                 title TEXT NOT NULL,
                 description TEXT,
                 color TEXT,
-                notified TEXT
+                notified TEXT,
+                google_event_id TEXT
+            )",
+            [],
+        )
+        .unwrap();
+        conn.execute(
+            "CREATE TABLE IF NOT EXISTS google_auth (
+                id INTEGER PRIMARY KEY CHECK (id = 1),
+                client_id TEXT NOT NULL,
+                client_secret TEXT NOT NULL,
+                access_token TEXT,
+                refresh_token TEXT,
+                expires_at INTEGER
             )",
             [],
         )
         .unwrap();
         conn
+    }
+
+    #[test]
+    fn test_google_auth_db_operations() {
+        let conn = setup_test_db();
+        assert!(get_google_auth(&conn).is_none());
+
+        save_google_credentials(&conn, "test_client_id", "test_client_secret");
+        let auth = get_google_auth(&conn).unwrap();
+        assert_eq!(auth.client_id, "test_client_id");
+        assert_eq!(auth.client_secret, "test_client_secret");
+        assert!(auth.access_token.is_none());
+
+        save_google_tokens(&conn, "access_123", Some("refresh_456"), 3600);
+        let auth = get_google_auth(&conn).unwrap();
+        assert_eq!(auth.access_token.as_deref(), Some("access_123"));
+        assert_eq!(auth.refresh_token.as_deref(), Some("refresh_456"));
+
+        clear_google_auth(&conn);
+        assert!(get_google_auth(&conn).is_none());
     }
 
     #[test]
