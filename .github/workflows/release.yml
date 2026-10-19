@@ -40,6 +40,15 @@ jobs:
       - name: Build Release Binary
         run: cargo build --release --target ${{ matrix.target }}
 
+      - name: Sign Windows executable
+        if: runner.os == 'Windows'
+        uses: pacyworld/codesign-action@77a366c6bf3c17a1abaf5fcc89ec11b3b0ff4642
+        with:
+          pfx_base64: ${{ secrets.CODESIGN_PFX_BASE64 }}
+          pfx_password: ${{ secrets.CODESIGN_PFX_PASSWORD }}
+          files: "target/${{ matrix.target }}/release/taskie.exe"
+          name: "Taskie"
+
       - name: Rename Binary
         run: |
           mkdir artifacts
