@@ -3,8 +3,11 @@ slint::include_modules!();
 pub mod google_calendar;
 
 use chrono::{Datelike, Local, NaiveDate, Utc};
+#[cfg(target_os = "linux")]
 use ksni::blocking::TrayMethods;
+#[cfg(target_os = "linux")]
 use ksni::menu::*;
+#[cfg(target_os = "linux")]
 use ksni::{MenuItem, Tray};
 use rusqlite::{params, Connection};
 use slint::{ModelRc, SharedString, VecModel};
@@ -302,10 +305,12 @@ fn get_events_for_date(db_events: &[Event], target_date: NaiveDate) -> Vec<Calen
         .collect()
 }
 
+#[cfg(target_os = "linux")]
 struct TaskieTray {
     ui_handle: slint::Weak<MainWindow>,
 }
 
+#[cfg(target_os = "linux")]
 impl Tray for TaskieTray {
     fn id(&self) -> String {
         "taskie".into()
@@ -459,11 +464,13 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let ui = MainWindow::new()?;
 
     // Minimize / hide to tray when user closes the window, keeping background notifier running
+    #[cfg(target_os = "linux")]
     ui.window().on_close_requested(move || {
         slint::CloseRequestResponse::HideWindow
     });
 
     // Spawn tray icon service
+    #[cfg(target_os = "linux")]
     let _tray_handle = TaskieTray {
         ui_handle: ui.as_weak(),
     }
