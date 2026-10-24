@@ -7,7 +7,7 @@ Taskie is a lightweight desktop calendar and event management application built 
 - **Interactive Calendar Grid**: View monthly calendar layouts with automatic date and day cell calculations.
 - **Event Management**: Create, view, and delete events with customizable titles, start/end times, descriptions, and color tags.
 - **Desktop Notifications**: Background worker checks scheduled events and triggers native desktop notifications when events occur.
-- **System Tray Support**: Runs in the background and provides system tray access (Show, Hide, Quit) via `ksni`.
+- **System Tray Support**: Runs in the background and provides system tray access (Show, Hide, Quit) via cross-platform tray integration.
 - **SQLite Persistence**: Stores calendar events locally in `~/.calendar.db`.
 
 ## Tech Stack
@@ -15,7 +15,7 @@ Taskie is a lightweight desktop calendar and event management application built 
 - **GUI**: [Slint](https://slint.dev/) (v1.8 / v1.18)
 - **Database**: [rusqlite](https://crates.io/crates/rusqlite) (SQLite with bundled feature)
 - **Notifications**: [notify-rust](https://crates.io/crates/notify-rust)
-- **System Tray**: [ksni](https://crates.io/crates/ksni)
+- **System Tray**: [tray-icon](https://crates.io/crates/tray-icon)
 - **Time/Date handling**: [chrono](https://crates.io/crates/chrono)
 
 ## Prerequisites
