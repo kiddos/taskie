@@ -42,6 +42,20 @@ To build an optimized release binary:
 cargo build --release
 ```
 
+### Windows Installer (Inno Setup)
+
+To build the Windows installer locally on Windows using [Inno Setup](https://jrsoftware.org/isinfo.php):
+
+1. Compile the 64-bit release binary:
+   ```powershell
+   cargo build --release --target x86_64-pc-windows-msvc
+   ```
+2. Compile the installer with `iscc`:
+   ```powershell
+   iscc installer\windows\taskie.iss
+   ```
+The installer executable will be created at `artifacts/taskie-windows-setup.exe`. In GitHub Actions, the installer is built automatically on new releases or manual workflow dispatch.
+
 ### Run
 
 To launch Taskie:
