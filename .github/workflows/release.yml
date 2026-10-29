@@ -3,6 +3,7 @@ name: Rust Release
 on:
   release:
     types: [created]  # Trigger when a new GitHub release is created
+  workflow_dispatch:
 
 jobs:
   build:
@@ -37,15 +38,48 @@ jobs:
       - name: Build Release Binary
         run: cargo build --release --target ${{ matrix.target }}
 
-      - name: Rename Binary
+      - name: Setup Inno Setup
+        if: runner.os == 'Windows'
+        shell: pwsh
         run: |
-          mkdir artifacts
+          if (-not (Get-Command iscc -ErrorAction SilentlyContinue)) {
+            if (Test-Path "C:\Program Files (x86)\Inno Setup 6\ISCC.exe") {
+              echo "C:\Program Files (x86)\Inno Setup 6" | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
+            } else {
+              choco install innosetup --no-progress
+              echo "C:\Program Files (x86)\Inno Setup 6" | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
+            }
+          }
+
+      - name: Prepare Artifacts Directory
+        run: |
+          mkdir -p artifacts
           if [ "${{ runner.os }}" == "Windows" ]; then
-            mv target/${{ matrix.target }}/release/taskie.exe artifacts/${{ matrix.artifact }}
+            cp target/${{ matrix.target }}/release/taskie.exe artifacts/${{ matrix.artifact }}
           else
-            mv target/${{ matrix.target }}/release/taskie artifacts/${{ matrix.artifact }}
+            cp target/${{ matrix.target }}/release/taskie artifacts/${{ matrix.artifact }}
           fi
         shell: bash
+
+      - name: Build Windows Installer
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $version = "${{ github.ref_name }}".TrimStart('v')
+          if (-not $version -or $version -eq "master" -or $version -eq "main") {
+            $cargoToml = Get-Content Cargo.toml -Raw
+            if ($cargoToml -match 'version\s*=\s*"([^"]+)"') {
+              $version = $matches[1]
+            } else {
+              $version = "0.1.0"
+            }
+          }
+          New-Item -ItemType Directory -Force -Path artifacts | Out-Null
+          $sourceDir = (Resolve-Path "target/${{ matrix.target }}/release").Path
+          $iconDir = (Resolve-Path "assets").Path
+          $outputDir = (Resolve-Path "artifacts").Path
+          Write-Host "Compiling Windows installer for version $version..."
+          iscc /DMyAppVersion="$version" /DSourceDir="$sourceDir" /DIconDir="$iconDir" /DOutputDir="$outputDir" /DOutputBaseFilename="taskie-windows-setup" installer/windows/taskie.iss
 
       - name: Upload Binary
         uses: actions/upload-artifact@v4
@@ -53,10 +87,18 @@ jobs:
           name: ${{ matrix.artifact }}
           path: artifacts/${{ matrix.artifact }}
 
+      - name: Upload Windows Installer
+        if: runner.os == 'Windows'
+        uses: actions/upload-artifact@v4
+        with:
+          name: taskie-windows-setup.exe
+          path: artifacts/taskie-windows-setup.exe
+
   release:
     name: Upload to GitHub Release
     needs: build
     runs-on: ubuntu-latest
+    if: github.event_name == 'release'
     permissions:
       contents: write
 

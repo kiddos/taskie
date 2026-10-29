@@ -1,3 +1,5 @@
+#![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
+
 slint::include_modules!();
 
 pub mod google_calendar;
@@ -304,51 +306,8 @@ fn get_events_for_date(db_events: &[Event], target_date: NaiveDate) -> Vec<Calen
 fn create_tray_icon() -> Result<tray_icon::Icon, Box<dyn std::error::Error>> {
     const WIDTH: u32 = 32;
     const HEIGHT: u32 = 32;
-    let mut rgba = vec![0u8; (WIDTH * HEIGHT * 4) as usize];
-
-    for y in 0..HEIGHT {
-        for x in 0..WIDTH {
-            let idx = ((y * WIDTH + x) * 4) as usize;
-            // Pins / rings
-            if (3..=5).contains(&y) && ((8..=10).contains(&x) || (21..=23).contains(&x)) {
-                rgba[idx] = 71;      // R
-                rgba[idx + 1] = 85;  // G
-                rgba[idx + 2] = 105; // B
-                rgba[idx + 3] = 255; // A
-            }
-            // Header bar
-            else if (6..=11).contains(&y) && (4..=27).contains(&x) {
-                rgba[idx] = 59;      // R: #3b82f6
-                rgba[idx + 1] = 130; // G
-                rgba[idx + 2] = 246; // B
-                rgba[idx + 3] = 255; // A
-            }
-            // Calendar body
-            else if (12..=28).contains(&y) && (4..=27).contains(&x) {
-                if x == 4 || x == 27 || y == 28 {
-                    rgba[idx] = 203;     // #cbd5e1 border
-                    rgba[idx + 1] = 213;
-                    rgba[idx + 2] = 225;
-                    rgba[idx + 3] = 255;
-                } else {
-                    let is_dot = ((y - 13) % 4 == 2) && ((x - 5) % 5 == 2);
-                    if is_dot {
-                        rgba[idx] = 100;     // #64748b
-                        rgba[idx + 1] = 116;
-                        rgba[idx + 2] = 139;
-                        rgba[idx + 3] = 255;
-                    } else {
-                        rgba[idx] = 255;     // White background
-                        rgba[idx + 1] = 255;
-                        rgba[idx + 2] = 255;
-                        rgba[idx + 3] = 255;
-                    }
-                }
-            }
-        }
-    }
-
-    Ok(tray_icon::Icon::from_rgba(rgba, WIDTH, HEIGHT)?)
+    const ICON_RGBA: &[u8] = include_bytes!("../assets/icon_32.rgba");
+    Ok(tray_icon::Icon::from_rgba(ICON_RGBA.to_vec(), WIDTH, HEIGHT)?)
 }
 
 fn setup_tray(ui: &MainWindow) -> Result<TrayIcon, Box<dyn std::error::Error>> {

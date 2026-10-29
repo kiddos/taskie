@@ -21,6 +21,7 @@ export struct DayCell {
 
 export component MainWindow inherits Window {
     title: "Taskie - Calendar & Tasks";
+    icon: @image-url("../assets/icon.png");
     min-width: 980px;
     min-height: 820px;
     background: #f8fafc;
@@ -73,19 +74,11 @@ export component MainWindow inherits Window {
                 HorizontalLayout {
                     spacing: 12px;
 
-                    Rectangle {
+                    Image {
                         width: 32px;
                         height: 32px;
-                        background: #3b82f6;
-                        border-radius: 8px;
+                        source: @image-url("../assets/icon.png");
                         y: (parent.height - self.height) / 2;
-
-                        Text {
-                            text: "📅";
-                            font-size: 16px;
-                            x: (parent.width - self.width) / 2;
-                            y: (parent.height - self.height) / 2;
-                        }
                     }
 
                     Text {
